@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 
 export default function App() {
+  // 1. Estado principal de la calculadora (tu configuración de siempre)
   const [config, setConfig] = useState(() => {
     const saved = localStorage.getItem('calculadora_3d_config_v2');
     return saved ? JSON.parse(saved) : {
@@ -8,21 +9,39 @@ export default function App() {
       pesoPieza: 50,
       tiempoHoras: 1,
       tiempoMinutos: 30,
-      // Modos de cálculo de máquina: 'tarifa' o 'avanzado'
       modoMaquina: 'tarifa', 
-      tarjetaHoraMaquina: 350, // Lo que cobra el diseñador por hora de máquina (luz+desgaste)
+      tarjetaHoraMaquina: 350, 
       consumoMaquina: 150,
       costoKwh: 120,
-      insumosAdicionales: 200, // Pegamento, tornillos, etc.
-      manoObra: 1000,          // Trabajo de post-procesado / diseño fijo por pieza
+      insumosAdicionales: 200, 
+      manoObra: 1000,          
       porcentajeGanancia: 50,
-      cantidadSet: 5
+      cantidadSet: 5,
+      insumosPorTotal: false,
+      manoObraPorTotal: false
     };
   });
 
+  // 2. NUEVO ESTADO: Lista de perfiles de máquinas guardados en LocalStorage
+  const [perfiles, setPerfiles] = useState(() => {
+    const savedPerfiles = localStorage.getItem('calculadora_3d_perfiles_maquinas');
+    return savedPerfiles ? JSON.parse(savedPerfiles) : [
+      { id: 1, nombre: 'Máquina Estándar', tarifa: 350 } // Un perfil base por defecto
+    ];
+  });
+
+  // 3. NUEVO ESTADO: Controla el input para escribir el nombre de la nueva máquina
+  const [nuevoNombrePerfil, setNuevoNombrePerfil] = useState('');
+
+  // Guardar configuración de la app
   useEffect(() => {
     localStorage.setItem('calculadora_3d_config_v2', JSON.stringify(config));
   }, [config]);
+
+  // NUEVO EFFECT: Guardar los perfiles de las máquinas cuando cambien
+  useEffect(() => {
+    localStorage.setItem('calculadora_3d_perfiles_maquinas', JSON.stringify(perfiles));
+  }, [perfiles]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -32,26 +51,60 @@ export default function App() {
     }));
   };
 
-  // 1. Convertimos todo el tiempo ingresado a horas decimales
-  const tiempoTotalEnHoras = config.tiempoHoras + (config.tiempoMinutos / 60);
+  const handleCheckboxChange = (name) => {
+    setConfig(prev => ({
+      ...prev,
+      [name]: !prev[name]
+    }));
+  };
 
-  // 2. Cálculo del costo de material
+  // 🛠️ FUNCIONES PARA GESTIONAR PERFILES
+  
+  // Guardar la tarifa actual con un nuevo nombre de máquina
+  const agregarPerfil = (e) => {
+    e.preventDefault();
+    if (!nuevoNombrePerfil.trim()) return;
+
+    const nuevoPerfil = {
+      id: Date.now(),
+      nombre: nuevoNombrePerfil.trim(),
+      tarifa: config.tarjetaHoraMaquina
+    };
+
+    setPerfiles(prev => [...prev, nuevoPerfil]);
+    setNuevoNombrePerfil('');
+  };
+
+  // Cargar la tarifa de la máquina seleccionada en la calculadora
+  const cargarPerfil = (tarifa) => {
+    setConfig(prev => ({
+      ...prev,
+      tarjetaHoraMaquina: tarifa
+    }));
+  };
+
+  // Borrar una máquina de la lista
+  const eliminarPerfil = (id, e) => {
+    e.stopPropagation(); // Evita que se dispare la carga al clickear el botón de borrar
+    setPerfiles(prev => prev.filter(p => p.id !== id));
+  };
+
+
+  // MATEMÁTICA Y CÁLCULOS (Se mantiene igual que antes)
+  const cantidad = Number(config.cantidadSet) || 1;
+  const tiempoTotalEnHoras = config.tiempoHoras + (config.tiempoMinutos / 60);
   const costoMaterialPieza = (config.precioFilamento / 1000) * config.pesoPieza;
 
-  // 3. Cálculo del costo de máquina (según el método elegido)
   const costoMaquinaPieza = config.modoMaquina === 'tarifa'
     ? tiempoTotalEnHoras * config.tarjetaHoraMaquina
     : tiempoTotalEnHoras * (config.consumoMaquina / 1000) * config.costoKwh;
 
-  // 4. Costo Neto Base (Suma de todo lo que sale fabricar una pieza)
-  const costoNetoPieza = costoMaterialPieza + costoMaquinaPieza + config.insumosAdicionales + config.manoObra;
-  
-  // 5. Precio de Venta Sugerido aplicando el margen
+  const costoInsumosUnidad = config.insumosPorTotal ? config.insumosAdicionales / cantidad : config.insumosAdicionales;
+  const costoManoObraUnidad = config.manoObraPorTotal ? config.manoObra / cantidad : config.manoObra;
+  const costoNetoPieza = costoMaterialPieza + costoMaquinaPieza + costoInsumosUnidad + costoManoObraUnidad;
   const precioVentaPieza = costoNetoPieza * (1 + config.porcentajeGanancia / 100);
-
-  // Totales para el Set
-  const costoNetoSet = costoNetoPieza * config.cantidadSet;
-  const precioVentaSet = precioVentaPieza * config.cantidadSet;
+  const costoNetoSet = costoNetoPieza * cantidad;
+  const precioVentaSet = precioVentaPieza * cantidad;
 
   return (
     <div style={styles.container}>
@@ -63,7 +116,48 @@ export default function App() {
       <div style={styles.layout}>
         {/* COLUMNA DE CONFIGURACIÓN */}
         <section style={styles.card}>
-          <h2 style={styles.sectionTitle}>Variables de Insumo</h2>
+          
+          {/* 🖥️ NUEVA SECCIÓN: GESTIÓN DE PERFILES DE MÁQUINAS */}
+          <h2 style={styles.sectionTitle}>Perfiles de Impresoras</h2>
+          
+          <div style={styles.profileSection}>
+            <label style={styles.label}>Seleccionar Máquina Guardada:</label>
+            <div style={styles.profileList}>
+              {perfiles.map(p => (
+                <div 
+                  key={p.id} 
+                  onClick={() => cargarPerfil(p.tarifa)}
+                  style={{
+                    ...styles.profileItem,
+                    borderColor: config.tarjetaHoraMaquina === p.tarifa ? '#3b82f6' : '#475569',
+                    backgroundColor: config.tarjetaHoraMaquina === p.tarifa ? '#1e3a8a33' : '#0f172a'
+                  }}
+                >
+                  <div>
+                    <span style={{ fontWeight: '600', block: 'block' }}>{p.nombre}</span>
+                    <span style={styles.unit}> (${p.tarifa}/hs)</span>
+                  </div>
+                  {perfiles.length > 1 && (
+                    <button onClick={(e) => eliminarPerfil(p.id, e)} style={styles.deleteBtn}>✕</button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Formulario rápido para guardar la tarifa actual como perfil */}
+            <form onSubmit={agregarPerfil} style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <input 
+                type="text" 
+                placeholder="Nombre de la máquina... (Ej: Ender 5)" 
+                value={nuevoNombrePerfil} 
+                onChange={(e) => setNuevoNombrePerfil(e.target.value)}
+                style={styles.input}
+              />
+              <button type="submit" style={styles.button}>Guardar Actual</button>
+            </form>
+          </div>
+
+          <h2 style={{ ...styles.sectionTitle, marginTop: '24px' }}>Variables de Insumo</h2>
           
           {/* MATERIAL Y PESO */}
           <div style={styles.grid2}>
@@ -102,7 +196,7 @@ export default function App() {
           {/* ENTRADAS DINÁMICAS SEGÚN EL MODO DE MÁQUINA */}
           {config.modoMaquina === 'tarifa' ? (
             <div style={styles.inputGroup}>
-              <label style={styles.label}>Tarifa Impresora <span style={styles.unit}>($ por hora de uso)</span></label>
+              <label style={styles.label}>Tarifa Impresora Activa <span style={styles.unit}>($ por hora de uso)</span></label>
               <input type="number" name="tarjetaHoraMaquina" value={config.tarjetaHoraMaquina} onChange={handleChange} style={styles.input} />
             </div>
           ) : (
@@ -118,16 +212,40 @@ export default function App() {
             </div>
           )}
 
-          {/* EXTRAS: INSUMOS Y MANO DE OBRA */}
-          <div style={styles.grid2}>
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Insumos Extras <span style={styles.unit}>($/u)</span></label>
-              <input type="number" name="insumosAdicionales" value={config.insumosAdicionales} onChange={handleChange} style={styles.input} placeholder="Tornillos, imanes..." />
+          {/* EXTRAS: INSUMOS CON SWITCH TOTAL/UNIDAD */}
+          <div style={styles.inputGroup}>
+            <div style={styles.labelToggleContainer}>
+              <label style={styles.label}>Insumos Extras</label>
+              <label style={styles.toggleLabel}>
+                <input 
+                  type="checkbox" 
+                  name="insumosPorTotal" 
+                  checked={config.insumosPorTotal || false} 
+                  onChange={() => handleCheckboxChange('insumosPorTotal')} 
+                  style={styles.checkbox}
+                />
+                <span>¿Costo total set?</span>
+              </label>
             </div>
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Mano de Obra <span style={styles.unit}>($/u)</span></label>
-              <input type="number" name="manoObra" value={config.manoObra} onChange={handleChange} style={styles.input} placeholder="Diseño, lijado..." />
+            <input type="number" name="insumosAdicionales" value={config.insumosAdicionales} onChange={handleChange} style={styles.input} placeholder="Tornillos, imanes..." />
+          </div>
+
+          {/* EXTRAS: MANO DE OBRA CON SWITCH TOTAL/UNIDAD */}
+          <div style={styles.inputGroup}>
+            <div style={styles.labelToggleContainer}>
+              <label style={styles.label}>Mano de Obra</label>
+              <label style={styles.toggleLabel}>
+                <input 
+                  type="checkbox" 
+                  name="manoObraPorTotal" 
+                  checked={config.manoObraPorTotal || false} 
+                  onChange={() => handleCheckboxChange('manoObraPorTotal')} 
+                  style={styles.checkbox}
+                />
+                <span>¿Costo total set?</span>
+              </label>
             </div>
+            <input type="number" name="manoObra" value={config.manoObra} onChange={handleChange} style={styles.input} placeholder="Diseño, lijado..." />
           </div>
 
           {/* CANTIDAD SET Y MARGEN */}
@@ -160,12 +278,12 @@ export default function App() {
               <span style={styles.rowValue}>${costoMaquinaPieza.toFixed(2)}</span>
             </div>
             <div style={styles.row}>
-              <span style={styles.rowLabel}>Insumos Adicionales</span>
-              <span style={styles.rowValue}>${config.insumosAdicionales.toFixed(2)}</span>
+              <span style={styles.rowLabel}>Insumos Adicionales {config.insumosPorTotal && '(Prorrateado)'}</span>
+              <span style={styles.rowValue}>${costoInsumosUnidad.toFixed(2)}</span>
             </div>
             <div style={styles.row}>
-              <span style={styles.rowLabel}>Mano de Obra</span>
-              <span style={styles.rowValue}>${config.manoObra.toFixed(2)}</span>
+              <span style={styles.rowLabel}>Mano de Obra {config.manoObraPorTotal && '(Prorrateado)'}</span>
+              <span style={styles.rowValue}>${costoManoObraUnidad.toFixed(2)}</span>
             </div>
             
             <div style={styles.rowHighlight}>
@@ -179,7 +297,7 @@ export default function App() {
           </div>
 
           <div style={{ ...styles.resultBlock, marginTop: '24px', borderTop: '1px solid #334155', paddingTop: '20px' }}>
-            <h3 style={styles.resultBlockTitle}>Por Set ({config.cantidadSet} unidades)</h3>
+            <h3 style={styles.resultBlockTitle}>Por Set ({cantidad} unidades)</h3>
             <div style={styles.row}>
               <span style={styles.rowLabel}>Costo Neto Total Set</span>
               <span style={styles.rowValue}>${costoNetoSet.toFixed(2)}</span>
@@ -195,7 +313,7 @@ export default function App() {
   );
 }
 
-// 🎨 Estilos Oscuros Modificados
+// 🎨 Estilos Oscuros Modificados (con nuevos estilos de perfiles)
 const styles = {
   container: {
     backgroundColor: '#0f172a',
@@ -250,11 +368,75 @@ const styles = {
     borderBottom: '1px solid #334155',
     paddingBottom: '12px',
   },
+  profileSection: {
+    backgroundColor: '#0f172a55',
+    padding: '16px',
+    borderRadius: '12px',
+    border: '1px dashed #475569',
+  },
+  profileList: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '8px',
+    marginTop: '8px',
+    marginBottom: '12px',
+  },
+  profileItem: {
+    border: '1px solid',
+    borderRadius: '8px',
+    padding: '8px 12px',
+    fontSize: '0.85rem',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    transition: 'all 0.15s ease',
+  },
+  deleteBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#ef4444',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    fontSize: '0.8rem',
+    padding: '0 2px',
+  },
+  button: {
+    backgroundColor: '#3b82f6',
+    border: 'none',
+    color: '#ffffff',
+    borderRadius: '10px',
+    padding: '10px 14px',
+    fontSize: '0.85rem',
+    fontWeight: '600',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    transition: 'background-color 0.15s',
+  },
   inputGroup: {
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
     marginBottom: '18px',
+  },
+  labelToggleContainer: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '2px',
+  },
+  toggleLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '0.8rem',
+    color: '#3b82f6',
+    cursor: 'pointer',
+    fontWeight: '600',
+  },
+  checkbox: {
+    cursor: 'pointer',
+    accentColor: '#3b82f6',
   },
   grid2: {
     display: 'grid',
